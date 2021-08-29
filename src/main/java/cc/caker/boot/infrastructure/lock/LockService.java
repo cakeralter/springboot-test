@@ -2,11 +2,12 @@ package cc.caker.boot.infrastructure.lock;
 
 import cc.caker.boot.infrastructure.cache.RedisService;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * LockService
@@ -19,12 +20,22 @@ import java.util.Collections;
 @Component
 public class LockService {
 
+    /**
+     * 最大重试次数
+     */
     private static final int MAX_RETRY = 3;
+    /**
+     * 过期时间3s
+     */
     private static final int EXPIRE_3S = 3;
+    /**
+     * 重试时间10s
+     */
     private static final int TIMEOUT = 10000;
+    /**
+     * 删除锁的Lua脚本
+     */
     private static final String LUA_DEL_SCRIPT;
-    private static ThreadLocal<String> threadLocal = new ThreadLocal<>();
-
     static {
         LUA_DEL_SCRIPT = "if redis.call(\"get\", KEYS[1]) == ARGV[1] " +
                 "then " +
@@ -33,6 +44,12 @@ public class LockService {
                 "return 0 " +
                 "end";
     }
+
+    /**
+     * 记录线程UID 避免锁被其它误删
+     */
+    private static ThreadLocal<String> threadLocal =
+            ThreadLocal.withInitial(() -> UUID.randomUUID().toString());
 
     @Autowired
     private RedisService redisService;
@@ -66,20 +83,17 @@ public class LockService {
      * @return
      */
     public Boolean tryLock(String key, Integer expire) {
-        String localVal = threadLocal.get();
-        if (StringUtils.isNotBlank(localVal)) {
-            String value = redisService.get(key);
-            if (localVal.equals(value)) {
-                return true;
-            }
+        String threadId = threadLocal.get();
+        String value = redisService.get(key);
+        if (Objects.equals(threadId, value)) {
+            return true;
         }
 
         long start = System.currentTimeMillis();
         for (; ; ) {
-            String result = redisService.setne(key, localVal, expire);
+            String result = redisService.setne(key, threadId, expire);
             if ("OK".equals(result)) {
-                threadLocal.set(localVal);
-                log.info("LockService::tryLock successful, key={}, value={}", key, localVal);
+                log.info("LockService::tryLock successful, key={}, value={}", key, threadId);
                 return true;
             }
 
@@ -106,21 +120,17 @@ public class LockService {
      * @return
      */
     public Boolean unlock(String key) {
-        String localVal = threadLocal.get();
-        if (StringUtils.isBlank(localVal)) {
-            log.warn("LockService::unlock failed, key={}", key);
-            return false;
-        }
+        String threadId = threadLocal.get();
         Boolean result = redisService.eval(
                 LUA_DEL_SCRIPT,
                 Collections.singletonList(key),
-                Collections.singletonList(localVal));
+                Collections.singletonList(threadId));
         if (result) {
-            log.info("LockService::unlock successful, key={}, value={}", key, localVal);
-            threadLocal.remove();
+            log.info("LockService::unlock successful, key={}, value={}", key, threadId);
             return true;
         }
-        log.warn("LockService::unlock failed, key={}, value={}", key, localVal);
+
+        log.warn("LockService::unlock failed, key={}, value={}", key, threadId);
         return false;
     }
 }
