@@ -1,60 +1,16 @@
 package cc.caker.boot.infrastructure.cache;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.JedisPoolConfig;
-import redis.clients.jedis.params.SetParams;
-
-import javax.annotation.PreDestroy;
 import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
 
 /**
- * RedisUtils
+ * RedisService
+ * Redis操作封装
  *
  * @author cakeralter
- * @date 2021/8/28
+ * @date 2021/8/31
  * @since 1.0
  */
-@Slf4j
-@Component
-public class RedisService {
-
-    /**
-     * 常量参数
-     */
-    private static final String HOST = "81.69.255.167";
-    private static final String PASSWORD = "redispassword";
-    private static final int PORT = 6379;
-    private static final int TIMEOUT = 30;
-
-    private static final int MAX_TOTAL = 8;
-    private static final int MAX_IDLE = 8;
-    private static final int MIN_IDLE = 4;
-
-    private static final Object LOCK = new Object();
-
-    private volatile JedisPool jedisPool;
-
-    /*@PostConstruct
-    public void init() {
-        JedisPoolConfig poolConfig = new JedisPoolConfig();
-        poolConfig.setMaxTotal(MAX_TOTAL);
-        poolConfig.setMaxIdle(MAX_IDLE);
-        poolConfig.setMinIdle(MIN_IDLE);
-
-        // 初始化连接池
-        jedisPool = new JedisPool(
-                poolConfig,
-                HOST,
-                PORT,
-                TIMEOUT,
-                PASSWORD);
-        log.info("JedisPool init...");
-    }*/
+public interface RedisService {
 
     /**
      * set
@@ -62,13 +18,7 @@ public class RedisService {
      * @param key
      * @param value
      */
-    public void set(String key, String value) {
-        try (Jedis jedis = getResource()) {
-            if (jedis != null) {
-                jedis.set(key, value);
-            }
-        }
-    }
+    void set(String key, String value);
 
     /**
      * get
@@ -76,13 +26,7 @@ public class RedisService {
      * @param key
      * @return
      */
-    public String get(String key) {
-        try (Jedis jedis = getResource()) {
-            return Optional.ofNullable(jedis)
-                    .map(c -> c.get(key))
-                    .orElse(null);
-        }
-    }
+    String get(String key);
 
     /**
      * set nx ex
@@ -92,81 +36,48 @@ public class RedisService {
      * @param expire
      * @return
      */
-    public String setne(String key, String value, Integer expire) {
-        try (Jedis jedis = getResource()) {
-            if (jedis == null) {
-                return "-1";
-            }
-            SetParams params = SetParams.setParams().nx().ex(expire);
-            return jedis.set(key, value, params);
-        }
-    }
+    String setne(String key, String value, Integer expire);
 
     /**
      * del
      *
      * @param key
      */
-    public void del(String key) {
-        try (Jedis jedis = getResource()) {
-            if (jedis != null) {
-                jedis.del(key);
-            }
-        }
-    }
+    void del(String key);
 
     /**
-     * eval
+     * del
      *
      * @param script
      * @param keys
      * @param args
-     */
-    public Boolean eval(String script, List<String> keys, List<String> args) {
-        try (Jedis jedis = getResource()) {
-            if (jedis != null) {
-                Object result = jedis.eval(script, keys, args);
-                return Objects.equals(1L, result);
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 获取连接
-     *
      * @return
      */
-    private Jedis getResource() {
-        if (jedisPool == null) {
-            synchronized (LOCK) {
-                if (jedisPool == null) {
-                    JedisPoolConfig poolConfig = new JedisPoolConfig();
-                    poolConfig.setMaxTotal(MAX_TOTAL);
-                    poolConfig.setMaxIdle(MAX_IDLE);
-                    poolConfig.setMinIdle(MIN_IDLE);
+    Boolean eval(String script, List<String> keys, List<String> args);
 
-                    // 初始化连接池
-                    jedisPool = new JedisPool(
-                            poolConfig,
-                            HOST,
-                            PORT,
-                            TIMEOUT,
-                            PASSWORD);
+    /**
+     * 新建一个bloom
+     *
+     * @param key  bloom key
+     * @param cap  初始容量
+     * @param rate 重复率
+     */
+    void bfreserve(String key, Long cap, double rate);
 
-                    log.info("JedisPool init...");
-                    return jedisPool.getResource();
-                }
-            }
-        }
-        return jedisPool.getResource();
-    }
+    /**
+     * bfmadd
+     *
+     * @param key
+     * @param values
+     */
+    void bfmadd(String key, String... values);
 
-    @PreDestroy
-    public void close() {
-        if (jedisPool != null) {
-            jedisPool.close();
-            log.info("JedisPool is close...");
-        }
-    }
+    /**
+     * bfexists
+     *
+     * @param key
+     * @param value
+     * @return
+     */
+    Boolean bfexists(String key, String value);
 }
